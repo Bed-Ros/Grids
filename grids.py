@@ -59,7 +59,6 @@ def create_horizontal_triangular_grid(width, height, torus=True):
         w_cells += 1
     grid = pygame.Surface(right_coords(((w_cells + 1) * cos60, h_cells * sin60)), pygame.SRCALPHA)
     grid.fill(pygame.Color('black'))
-    #grid.set_alpha(0)
     # /1\2/
     # \3/4\
     coords12 = [(0, sin60), (cos60, 0), (1, sin60)]
@@ -171,7 +170,7 @@ def draw_apple(context, coords, r):
     pygame.draw.circle(context, pygame.Color('red'), grid_for_snake[coords[0]][coords[1]], r)
 
 
-def centered_blit(img, box, horizontal=True, vertical=True):
+def centered_blit(img, box):
     x = (box.get_width() - img.get_width())/2
     y = (box.get_height() - img.get_height())/2
     return x, y
