@@ -3,18 +3,25 @@ import math
 import random
 
 
-grid_for_snake = []
 snake_coords = []
-triangular_side = 100
-
-RIGHT = [0, 1]
-LEFT = [0, -1]
-DOWN = [1, 0]
-UP = [-1, 0]
-
+# directions
+RIGHT = 'RIGHT'
+RIGHT_UP = 'RIGHT_UP'
+RIGHT_DOWN = 'RIGHT_DOWN'
+LEFT = 'LEFT'
+LEFT_UP = 'LEFT_UP'
+LEFT_DOWN = 'LEFT_DOWN'
+DOWN = 'DOWN'
+UP = 'UP'
+# math constants
+cos60 = 0.5
+sin60 = math.sin(math.radians(60))
+# flags
 APPLE_EATEN = 0
 GAME_OVER = 1
 SUCCESSFULLY_MOVED = 2
+TRIANGULAR = 3
+HEXAGONAL = 4
 
 
 def aspect_scale(img, box):
@@ -43,46 +50,85 @@ def aspect_scale(img, box):
     return pygame.transform.smoothscale(img, (int(sx), int(sy)))
 
 
-def right_coords(coords):
-    return [int(coords[0]*triangular_side), int(coords[1]*triangular_side)]
+def get_vertices_triangle(x, y, side):
+    if (x + y) % 2 == 1:
+        coords = ((0, 0), (cos60, sin60), (1, 0))
+    else:
+        coords = ((0, sin60), (cos60, 0), (1, sin60))
+    result = []
+    for ex_x, ex_y in coords:
+        result.append(((ex_x + (x/2)) * side, (ex_y + (y * sin60)) * side))
+    return result
 
 
-def create_horizontal_triangular_grid(width, height, torus=True):
-    grid_for_snake.clear()
-    cos60 = 0.5
-    sin60 = math.sin(math.radians(60))
-    # the radius of the inscribed circle
+def get_vertices_hexagon(x, y, side):
+    if x % 2 == 1:
+        coords = ((0, 2 * sin60), (cos60, sin60), (1 + cos60, sin60),
+                  (2, 2 * sin60), (1 + cos60, 3 * sin60), (cos60, 3 * sin60))
+    else:
+        coords = ((0, sin60), (cos60, 0), (1 + cos60, 0),
+                  (2, sin60), (1 + cos60, 2 * sin60), (cos60, 2 * sin60))
+    result = []
+    for ex_x, ex_y in coords:
+        result.append(((ex_x + (x / 2 * 3)) * side, (ex_y + (y * 2 * sin60)) * side))
+    return result
+
+
+def get_coords_triangle_snake(x, y, side):
     r = math.sqrt(3) / 6
-    h_cells = int(height / 2) * 2
-    w_cells = int(width / 2) * 2
-    if not torus:
-        w_cells += 1
-    grid = pygame.Surface(right_coords(((w_cells + 1) * cos60, h_cells * sin60)), pygame.SRCALPHA)
-    grid.fill(pygame.Color('black'))
-    # /1\2/
-    # \3/4\
-    coords12 = [(0, sin60), (cos60, 0), (1, sin60)]
-    coords34 = [(0, sin60), (cos60, 2*sin60), (1, sin60)]
-    for h in range(h_cells):
-        if h % 2 == 1:
-            coords = list(map(lambda a: (a[0], a[1] + ((h-1)*sin60)), coords34))
+    if (x + y) % 2 == 1:
+        return (int((x + 1) * cos60 * side), int((y * sin60 + r) * side)), int(r * side)
+    else:
+        return (int((x + 1) * cos60 * side), int(((y + 1) * sin60 - r) * side)), int(r * side)
+
+
+def get_coords_hexagonal_snake(x, y, side):
+    r = sin60
+    if x % 2 == 0:
+        return (int((x * (1 + cos60) + 1) * side), int((y * 2 * sin60 + sin60) * side)), int(r * side)
+    else:
+        return (int((x * (1 + cos60) + 1) * side), int((y + 1) * 2 * sin60 * side)), int(r * side)
+
+
+def triangular_grid_size(width, height, side):
+    return (width + 1) * cos60 * side, height * sin60 * side
+
+
+def hexagonal_grid_size(width, height, side):
+    return (width * (1 + cos60) + cos60) * side, (height * 2 * sin60 + sin60) * side
+
+
+def create_horizontal_grid(grid_type, width, height, side, torus=True):
+    if grid_type == TRIANGULAR:
+        grid_size = triangular_grid_size
+        get_vertices = get_vertices_triangle
+        h_cells = int(height / 2) * 2
+        w_cells = int(width / 2) * 2
+        if not torus:
+            w_cells += 1
+    else:
+        grid_size = hexagonal_grid_size
+        get_vertices = get_vertices_hexagon
+        h_cells = height
+        if torus:
+            w_cells = int(width / 2) * 2
         else:
-            coords = list(map(lambda a: (a[0], a[1] + (h*sin60)), coords12))
-        line = []
+            w_cells = width
+    grid = pygame.Surface(grid_size(w_cells, h_cells, side), pygame.SRCALPHA)
+    grid.fill(pygame.Color('black'))
+    for h in range(h_cells):
         for w in range(w_cells):
-            if (w+h) % 2 == 1:
-                line.append(right_coords(((w + 1) * cos60, h * sin60 + r)))
-            else:
-                line.append(right_coords(((w + 1) * cos60, (h + 1) * sin60 - r)))
-            pygame.draw.polygon(grid, pygame.Color('green'), list(map(right_coords, coords)))
-            pygame.draw.polygon(grid, pygame.Color('black'), list(map(right_coords, coords)), 1)
-            coords.pop(0)
-            coords.append((coords[0][0] + 1, coords[0][1]))
-        grid_for_snake.append(line)
-    return grid, right_coords((r, 0))[0]
+            vertices = get_vertices(w, h, side)
+            pygame.draw.polygon(grid, pygame.Color('green'), vertices)
+            pygame.draw.polygon(grid, pygame.Color('black'), vertices, 1)
+    return grid, (w_cells, h_cells)
 
 
-def draw_snake(context, r):
+def draw_snake(context, side, grid_type):
+    if grid_type == TRIANGULAR:
+        get_coords_snake = get_coords_triangle_snake
+    else:
+        get_coords_snake = get_coords_hexagonal_snake
     first = True
     for coords in snake_coords:
         if first:
@@ -90,49 +136,81 @@ def draw_snake(context, r):
             first = False
         else:
             c = pygame.Color('white')
-        pygame.draw.circle(context, c, grid_for_snake[coords[0]][coords[1]], r)
+        pygame.draw.circle(context, c, *get_coords_snake(*coords, side))
 
 
-def create_next_coords(direction):
-    return [snake_coords[0][0] + direction[0], snake_coords[0][1] + direction[1]]
+def create_next_coords(coords, direction):
+    x, y = coords
+    even_column = False
+    if x % 2 == 1:
+        even_column = True
+    if direction == RIGHT:
+        return [x + 1, y]
+    elif direction == LEFT:
+        return [x - 1, y]
+    elif direction == DOWN:
+        return [x, y + 1]
+    elif direction == UP:
+        return [x, y - 1]
+    elif direction == RIGHT_UP:
+        if even_column:
+            return [x + 1, y]
+        else:
+            return [x + 1, y - 1]
+    elif direction == RIGHT_DOWN:
+        if even_column:
+            return [x + 1, y + 1]
+        else:
+            return [x + 1, y]
+    elif direction == LEFT_DOWN:
+        if even_column:
+            return [x - 1, y + 1]
+        else:
+            return [x - 1, y]
+    elif direction == LEFT_UP:
+        if even_column:
+            return [x - 1, y]
+        else:
+            return [x - 1, y - 1]
 
 
-def find_direction(begin, end):
-    result = [begin[0] - end[0], begin[1] - end[1]]
-    for i in range(len(result)):
-        if abs(result[i]) > 1:
-            if result[i] < 0:
-                result[i] = 1
+def find_direction(begin, end, grid_type):
+    if grid_type == TRIANGULAR:
+        movements = [LEFT, RIGHT, UP, DOWN]
+    else:
+        movements = [LEFT_UP, LEFT_DOWN, RIGHT_UP, RIGHT_DOWN, DOWN, UP]
+    for move in movements:
+        if create_next_coords(begin, move) == end:
+            return move
+
+
+def move_snake(direction, apple_coords, grid_type, grid_size=None, torus=False):
+    if grid_type == TRIANGULAR:
+        # solving the control problem
+        if direction == DOWN and (snake_coords[0][0] + snake_coords[0][1]) % 2 == 1:
+            if create_next_coords(snake_coords[0], LEFT) == snake_coords[1]:
+                direction = RIGHT
             else:
-                result[i] = -1
-    return result
-
-
-def move_snake(direction, apple_coords, torus=True):
-    if direction == DOWN and (snake_coords[0][0] + snake_coords[0][1]) % 2 == 1:
-        if create_next_coords(LEFT) == snake_coords[1]:
-            direction = RIGHT
-        else:
-            direction = LEFT
-    if direction == UP and (snake_coords[0][0] + snake_coords[0][1]) % 2 == 0:
-        if create_next_coords(RIGHT) == snake_coords[1]:
-            direction = LEFT
-        else:
-            direction = RIGHT
+                direction = LEFT
+        if direction == UP and (snake_coords[0][0] + snake_coords[0][1]) % 2 == 0:
+            if create_next_coords(snake_coords[0], RIGHT) == snake_coords[1]:
+                direction = LEFT
+            else:
+                direction = RIGHT
     # finding out next coords of head
-    next_coords = create_next_coords(direction)
-    # torus things
-    if next_coords[0] < 0 or next_coords[0] >= len(grid_for_snake) or \
-            next_coords[1] < 0 or next_coords[1] >= len(grid_for_snake[0]):
+    next_coords = create_next_coords(snake_coords[0], direction)
+    # the snake hit the wall?
+    if next_coords[0] < 0 or next_coords[0] >= grid_size[0] or \
+            next_coords[1] < 0 or next_coords[1] >= grid_size[1]:
         if torus:
-            if next_coords[0] >= len(grid_for_snake):
+            if next_coords[0] >= grid_size[0]:
                 next_coords[0] = 0
             elif next_coords[0] < 0:
-                next_coords[0] = len(grid_for_snake) - 1
-            if next_coords[1] >= len(grid_for_snake[0]):
+                next_coords[0] = grid_size[0] - 1
+            if next_coords[1] >= grid_size[1]:
                 next_coords[1] = 0
             elif next_coords[1] < 0:
-                next_coords[1] = len(grid_for_snake[0]) - 1
+                next_coords[1] = grid_size[1] - 1
         else:
             return GAME_OVER
     # apple
@@ -146,7 +224,7 @@ def move_snake(direction, apple_coords, torus=True):
         if next_coords == snake_coords[1]:
             # turn snake
             snake_coords.append(tail)
-            new_dir = find_direction(snake_coords[-1], snake_coords[-2])
+            new_dir = find_direction(snake_coords[-2], snake_coords[-1], grid_type)
             snake_coords.reverse()
             return new_dir
         # body
@@ -157,17 +235,21 @@ def move_snake(direction, apple_coords, torus=True):
     return SUCCESSFULLY_MOVED
 
 
-def create_apple():
+def create_apple(grid_size):
     all_coords = []
-    for y in range(len(grid_for_snake[0])):
-        for x in range(len(grid_for_snake)):
+    for y in range(grid_size[1]):
+        for x in range(grid_size[0]):
             if [x, y] not in snake_coords:
                 all_coords.append([x, y])
     return random.choice(all_coords)
 
 
-def draw_apple(context, coords, r):
-    pygame.draw.circle(context, pygame.Color('red'), grid_for_snake[coords[0]][coords[1]], r)
+def draw_apple(context, coords, side, grid_type):
+    if grid_type == TRIANGULAR:
+        get_coords_apple = get_coords_triangle_snake
+    else:
+        get_coords_apple = get_coords_hexagonal_snake
+    pygame.draw.circle(context, pygame.Color('red'), *get_coords_apple(*coords, side))
 
 
 def centered_blit(img, box):
@@ -181,7 +263,7 @@ def create_game_over_surface(font1, font2):
     text2 = font2.render("Press R to restart", True, pygame.Color('red'))
     w = max(text1.get_width(), text2.get_width())
     h = text1.get_height() + text2.get_height()
-    result = pygame.Surface((w + 50, h + 50))
+    result = pygame.Surface((int(w * 1.2), int(h * 1.2)))
     rx1, ry1 = centered_blit(text1, result)
     result.blit(text1, (rx1, ry1 - text2.get_height() / 2))
     rx2, ry2 = centered_blit(text2, result)
@@ -189,10 +271,13 @@ def create_game_over_surface(font1, font2):
     return result
 
 
-def find_triangular_side(display, w, h):
-    x, y = display.get_size()
-    global triangular_side
-    triangular_side = max(x/w, y/h)
+def find_side(context_size, grid_width, grid_height, grid_type):
+    w, h = context_size
+    result = max(w/grid_width, h/grid_height)
+    if grid_type == TRIANGULAR:
+        return result * 2
+    else:
+        return result
 
 
 def main():
@@ -203,18 +288,27 @@ def main():
     font2 = pygame.font.SysFont('serif', int(win.get_width() / 30))
     font3 = pygame.font.SysFont('serif', int(win.get_width() / 40))
     game_over_surface = create_game_over_surface(font1, font2)
+    grid_type = HEXAGONAL
     pygame_open = True
     while pygame_open:
-        grid_width = 24
-        grid_height = 9
-        find_triangular_side(win, grid_width, grid_height)
-        clear_grid, r = create_horizontal_triangular_grid(grid_width, grid_height)
+        if grid_type == HEXAGONAL:
+            grid_width = 20
+            grid_height = 9
+        else:
+            grid_width = 24
+            grid_height = 8
+        side = find_side(win.get_size(), grid_width, grid_height, grid_type)
+        clear_grid, grid_size = create_horizontal_grid(grid_type, grid_width, grid_height, side)
         game_surface = pygame.Surface((win.get_width(), win.get_height()-font3.get_height()))
         snake_coords.clear()
-        snake_coords.extend([[0, 2], [0, 1], [0, 0]])
-        snake_move = RIGHT
-        apple_coords = create_apple()
+        snake_coords.extend([[2, 0], [1, 0], [0, 0]])
+        if grid_type == TRIANGULAR:
+            snake_move = RIGHT
+        else:
+            snake_move = RIGHT_DOWN
+        apple_coords = create_apple(grid_size)
         score = 0
+        restart_waiting = True
         game = True
         while game:
             pygame.time.Clock().tick(5)
@@ -223,42 +317,68 @@ def main():
                     pygame.quit()
                     return
                 if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_g:
+                        restart_waiting = False
+                        game = False
+                        if grid_type == HEXAGONAL:
+                            grid_type = TRIANGULAR
+                        else:
+                            grid_type = HEXAGONAL
                     if event.key == pygame.K_w:
                         snake_move = UP
                     if event.key == pygame.K_s:
                         snake_move = DOWN
-                    if event.key == pygame.K_a:
-                        snake_move = LEFT
-                    if event.key == pygame.K_d:
-                        snake_move = RIGHT
-            result = move_snake(snake_move, apple_coords)
-            if type(result) == list:
+                    if grid_type == TRIANGULAR:
+                        if event.key == pygame.K_a:
+                            snake_move = LEFT
+                        if event.key == pygame.K_d:
+                            snake_move = RIGHT
+                    elif grid_type == HEXAGONAL:
+                        if event.key == pygame.K_q:
+                            snake_move = LEFT_UP
+                        if event.key == pygame.K_a:
+                            snake_move = LEFT_DOWN
+                        if event.key == pygame.K_e:
+                            snake_move = RIGHT_UP
+                        if event.key == pygame.K_d:
+                            snake_move = RIGHT_DOWN
+            result = move_snake(snake_move, apple_coords, grid_type, grid_size, True)
+            if type(result) == str:
                 snake_move = result
             elif result == APPLE_EATEN:
                 score += 1
-                apple_coords = create_apple()
+                apple_coords = create_apple(grid_size)
             elif result == GAME_OVER:
                 game = False
             grid = clear_grid.copy()
             score_text = font3.render('score:' + str(score), True, pygame.Color('black'))
+            remark_text = font3.render('You can press G, after which the grid will change and the game will restart',
+                                       True, pygame.Color('black'))
             win.fill(pygame.Color('white'))
-            draw_apple(grid, apple_coords, r)
-            draw_snake(grid, r)
+            draw_apple(grid, apple_coords, side, grid_type)
+            draw_snake(grid, side, grid_type)
             grid = aspect_scale(grid, game_surface)
             game_surface.blit(grid, centered_blit(grid, game_surface))
             win.blit(game_surface, (0, font3.get_height()))
             win.blit(score_text, (10, 0))
+            win.blit(remark_text, (win.get_width() - remark_text.get_width() - 10, 0))
             pygame.display.update()
-        win.blit(game_over_surface, centered_blit(game_over_surface, win))
-        pygame.display.update()
-        restart_waiting = True
         while restart_waiting:
+            win.blit(game_over_surface, centered_blit(game_over_surface, win))
+            pygame.display.update()
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     return
-                if event.type == pygame.KEYDOWN and event.key == pygame.K_r:
-                    restart_waiting = False
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_r:
+                        restart_waiting = False
+                    if event.key == pygame.K_g:
+                        restart_waiting = False
+                        if grid_type == HEXAGONAL:
+                            grid_type = TRIANGULAR
+                        else:
+                            grid_type = HEXAGONAL
 
 
 if __name__ == '__main__':

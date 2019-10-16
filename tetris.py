@@ -40,15 +40,13 @@ class Tetromino:
             result.append((coord[0]+self.center[0], coord[1]+self.center[1]))
         return result
 
-    def rotate(self, field_size):
-        a = self.angle + 1
-        if a == len(self.coords):
-            a = 0
-        for coord in self.coords[a]:
-            for i in range(2):
-                if not (0 <= coord[i] + self.center[i] < field_size[i]):
-                    return
-        self.angle = a
+    def rotate(self, field):
+        a = self.angle
+        self.angle = self.angle + 1
+        if self.angle == len(self.coords):
+            self.angle = 0
+        if self.is_blocked(field, (0, 0)):
+            self.angle = a
 
     def correct_direction(self, d):
         if d in (Tetromino.right, Tetromino.left, Tetromino.down):
@@ -74,6 +72,7 @@ class Tetromino:
     def draw(self, context, cell_size):
         for x, y in self.coordinates():
             pygame.draw.rect(context, self.color, ((x * cell_size, y * cell_size), (cell_size, cell_size)))
+            pygame.draw.rect(context, pygame.Color('black'), ((x * cell_size, y * cell_size), (cell_size, cell_size)), 1)
 
 
 def create_field(context, cell_size):
@@ -107,24 +106,27 @@ def main():
     win = pygame.display.set_mode((field_width * cell_size, field_height * cell_size))
     pygame.display.set_caption("Tetris")
     field = create_field(win, cell_size)
+    pygame.time.set_timer(pygame.USEREVENT, 333)
     game = True
     while game:
         t = Tetromino((field_width, field_height))
         while not t.is_blocked(field):
-            pygame.time.Clock().tick(3)
+            pygame.time.Clock().tick(60)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     return
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_w:
-                        t.rotate((field_width, field_height))
+                        t.rotate(field)
                     if event.key == pygame.K_s:
                         t.shift(Tetromino.down, field)
                     if event.key == pygame.K_a:
                         t.shift(Tetromino.left, field)
                     if event.key == pygame.K_d:
                         t.shift(Tetromino.right, field)
+                if event.type == pygame.USEREVENT:
+                    t.shift(Tetromino.down, field)
             draw_field(win, field, cell_size)
             t.draw(win, cell_size)
             pygame.display.update()
